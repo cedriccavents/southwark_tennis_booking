@@ -28,10 +28,25 @@ optional arguments:
 import argparse
 from datetime import datetime, timedelta
 from helper import setup_driver, book
-from constants import SOUTHWARK_PARK_IDS, TANNER_PARK_IDS, TANNER_URL, \
-    SOUTHWARK_URL, EMAIL, PASSWORD
+import logging
+import time
 
-###### This section defines command line arguments and options ######
+from constants import *
+
+# set up logger
+logging.basicConfig(
+    filename=f"run_{datetime.now().strftime('%d%m%Y')}.log",
+    filemode='w',
+    # format='%(asctime)s, %(msecs)d %(name)s %(levelname)s %message)s',
+    datefmt='%H:%M:%S',
+    level=logging.DEBUG
+)
+logger = logging.getLogger(__name__)
+s_handler = logging.StreamHandler()
+s_handler.setLevel(logging.DEBUG)
+logger.addHandler(s_handler)
+
+# command line arguments
 parser = argparse.ArgumentParser()
 available_hours = [str(h) for h in range(8, 21)]
 time_options = [hour + ':' + min for hour in available_hours for min in ['00', '30']]
@@ -40,48 +55,43 @@ parser.add_argument('times', nargs='+', choices=time_options,
 
 date_def = 7
 date_help = \
-"The date that the script will try to book. Can be a date, in which case it \
-needs to be in the form 'yyyy-mm-dd', or an integer, in which case it will \
-indicate the day falling 'date' days in the future. Defaults to 7 (i.e. the day \
-falling one week in the future)"
-parser.add_argument('--date', '-d', nargs='?', dest='date', help=date_help, default=date_def)
+parser.add_argument('--date', '-d', nargs='?', dest='date', default=date_def)
 
 wait_def = "20:0:0"
 wait_help = \
-"The time that the script will wait until making the booking. Can either be \
-'no' (if we want to book immediately) or be expressed in 'hour:minute:second'). \
-Defaults to '20:0:0' (8pm)"
-parser.add_argument('--wait', '-w', nargs='?', dest='wait', help=wait_help, default=wait_def)
+parser.add_argument('--wait', '-w', nargs='?', dest='wait', default=wait_def)
 
 args = parser.parse_args()
 times = args.times
 date = args.date
 wait = args.wait
 
-if len(date) == 1:
+if isinstance(date, int):
+    # default: check for same date next week
     date = (datetime.today() + timedelta(int(date))).strftime("%Y-%m-%d")
 else:
-    assert(len(date)==10), "Date must be in the form 'yyyy-mm-dd'"
+    assert(len(date) == 10), "Date must be in the form 'yyyy-mm-dd'"
 
 if wait.lower() == 'no':
     wait = None
 else:
-    assert(len(wait.split(':'))==3),\
+    assert(len(wait.split(':')) == 3),\
         "Wait time must be either 'no' or in the form 'hour:minute:second'"
     h, m, s = wait.split(':')
     wait = (int(h), int(m), int(s))
 
-###### End of command line arguments section ######
-
-
 driver = setup_driver()
-login_details = (EMAIL, PASSWORD)
 
+# book courts
 try:
-    book(driver, TANNER_URL, login_details, TANNER_PARK_IDS, date,
-         times, wait=wait)
-    book(driver, SOUTHWARK_URL, login_details, SOUTHWARK_PARK_IDS, date,
-         times, wait=wait)
+    while True:
+        val = book(driver, TANNER_URL, TANNER_PARK_IDS, date, times, wait=wait, verbose=1)
+        if val > 0:
+            # court is booked and stop run
+            break
+        else:
+            logger.info('Courts not available -- go to sleep for 25 seconds')
+            time.sleep(20)
 
 except Exception as e:
     print(e)
