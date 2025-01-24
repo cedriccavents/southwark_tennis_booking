@@ -19,20 +19,29 @@ This file implements some useful routines:
     the day and times(s) specified, by iterating over all courts and over all
     specified times.
 '''
-
-import time
 from datetime import datetime, timedelta
+from dotenv import load_dotenv
+import logging
+import os
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import NoSuchElementException
 from selenium.webdriver.firefox.options import Options
+import sys
+import time
+
 from constants import TAG, ATTR
 
+# envs
+load_dotenv()
 
-WAITING_TIME = 1.5
-
+WAITING_TIME = 2
+logger = logging.getLogger(__name__)
+s_handler = logging.StreamHandler()
+s_handler.setLevel(logging.DEBUG)
+logger.addHandler(s_handler)
 
 def setup_driver():
     '''
@@ -40,7 +49,7 @@ def setup_driver():
     '''
     options = Options()
     options.headless = True
-    driver = webdriver.Firefox(options=options)
+    driver = webdriver.Chrome(executable_path=os.getenv('CHROMEDRIVER_PATH'))
     driver.maximize_window()
     return driver
 
@@ -70,26 +79,22 @@ def wait_until(hour=20, minute=0, second=0):
             pass
 
 
-def sign_in(driver, url, email, password, poll_frequency=0.01):
+def sign_in(driver, username, password, poll_frequency=0.01):
     """
     This function signs into the booking website by providing email and password.
     It also accepts cookies in order to remove the banner in the following pages
     (not doing this may create some problems when trying to click on other buttons
     later on).
     """
-    driver.get(url)
-    try:
-        _ = driver.find_element_by_id("book-by-date-view")
-    except:
-        email_box = WebDriverWait(driver, WAITING_TIME * 2, poll_frequency).until(
-            EC.element_to_be_clickable((By.NAME, "EmailAddress")))
-        email_box.send_keys(email)
-        psd_box = WebDriverWait(driver, WAITING_TIME * 2, poll_frequency).until(
-            EC.element_to_be_clickable((By.NAME, "Password")))
-        psd_box.send_keys(password)
-        signin_btn = WebDriverWait(driver, WAITING_TIME * 2, poll_frequency).until(
-            EC.element_to_be_clickable((By.ID, "signin-btn")))
-        signin_btn.click()
+    # e-mail and password
+    WebDriverWait(driver, WAITING_TIME*2, poll_frequency).until(
+        EC.element_to_be_clickable((By.XPATH, "//input[@aria-labelledby='153:0-label']"))).send_keys(username)
+    WebDriverWait(driver, WAITING_TIME*2, poll_frequency).until(
+        EC.element_to_be_clickable((By.XPATH, "//input[@class='slds-input']"))).send_keys(password)
+
+    # login
+    WebDriverWait(driver, WAITING_TIME*2, poll_frequency).until(
+        EC.element_to_be_clickable((By.XPATH, '//button[@title="Log in"]'))).click()
 
     # accept cookies
     try:
@@ -151,7 +156,7 @@ def is_slot_available(
         slot = f"{day} | {int(start_time/60)}:{start_time%60} in {court}"
         try:
             if verbose == 1:
-                print(f"Looking for slot: {slot}")
+                logger.info(f"Looking for slot: {slot}")
             btn = WebDriverWait(driver, WAITING_TIME, poll_frequency).until(
                 EC.element_to_be_clickable((By.CSS_SELECTOR, query))
             )
@@ -161,7 +166,7 @@ def is_slot_available(
                 return False
         except:
             if verbose == 1:
-                print(f"Slot not available: {slot}")
+                logger.info(f"Slot not available: {slot}")
             return False
 
     for court in court_ids:
@@ -176,33 +181,13 @@ def is_slot_available(
     # if no slot was available in any court
     return None
 
-
 def book_slot(
-    driver, start_time, day, court_id, poll_frequency=0.01, verbose=0
+    driver, start_time, day, court_id, username, poll_frequency=0.01, verbose=0
 ):
-    """
-    This function assumes that we are in a booking page already, and tries to
-    book a particular slot.
-    It performes all operations sequentially in a series of try-except blocks.
-
-    Returns legend:
-    >  0: start time not available
-    >  1: booking is confirmed
-    >  2: can't determine whether booking was succesfull or not
-    > -1: failure to book (either an exception was thrown, or the booking was
-          unsuccesful - e.g. because we already reached our booking allowance)
-
-    Arguments:
-    -driver: an instance of selenium webdriver
-    -start_time: in minutes - e.g. 8.00 am is 480, 8.30 am is 510, etc.
-    -day: a string in the format 'YYYY-MM-DD'
-    -court_id: string, the ID of the court.
-    -poll_frequency: passed to WebDriverWait, regulates the frequency (in seconds)
-                    in which the action is repeated.
-                    Defaults to 0.01.
-    -verbose: regulates how many information are printed. If '1', prints detailed
-            information, otherwise doesn't print anything.
-            Defaults to 0.
+    """ This function books the actual slot. The booking is done in 3 main steps:
+        1. Find the available court(s) to book and click (+ accepting cookies)
+        2. Sign in using username and password
+        3. Make the payment and complete the booking
     """
 
     end_time = start_time + 60
@@ -212,6 +197,19 @@ def book_slot(
 
     # try to click on the slot button
     slot = f"{day} | {int(start_time/60)}:{start_time%60}"
+
+    # accept cookies
+    try:
+        driver.find_element(
+            By.XPATH,
+            '//button['
+            '@class=" osano-cm-accept-all osano-cm-buttons__button osano-cm-button osano-cm-button--type_accept "]'
+        ).click()
+    except:
+        pass
+    finally:
+        # sleep 1 second - otherwise next steps may fail
+        time.sleep(1)
 
     try:
         if verbose == 1:
@@ -280,56 +278,101 @@ def book_slot(
                 f"Failed to select end_time for slot: {slot}")
         return -1
 
-    # submit booking
-    try:
-        if verbose == 1:
-            print(f"Submitting booking for slot: {slot}")
-        btn = WebDriverWait(driver, WAITING_TIME, poll_frequency).until(
-            EC.presence_of_element_located((By.ID, "submit-booking"))
-        )
-        btn.click()
-    except:
-        if verbose == 1:
-            print(
-                f"Failed to submit booking for slot: {slot}")
-        return -1
+    # continue booking
+    WebDriverWait(driver, WAITING_TIME, poll_frequency).until(
+        EC.element_to_be_clickable((By.ID, 'submit-booking'))).click()
 
-    # confirm booking
+    # sign in using username and password
+    WebDriverWait(driver, WAITING_TIME, poll_frequency).until(
+        EC.element_to_be_clickable((By.XPATH, '//button[@class="cs-btn primary med fw"]'))).click()
     try:
+        sign_in(driver, os.getenv('USERNAME'), os.getenv('PASSWORD'))
+        # sign_in(driver, username, keyring.get_password("LTA", username))
         if verbose == 1:
-            print(f"Confirming booking for slot: {slot}")
-        btn = WebDriverWait(driver, WAITING_TIME, poll_frequency).until(
-            EC.presence_of_element_located((By.ID, "confirm"))
-        )
-        btn.click()
-    except:
-        if verbose == 1:
-            print(
-                f"Failed to confirm booking for slot: {slot}")
-        return -1
-
-    # try to determine whether booking was successful or not
-    try:
-        _ = driver.find_element_by_class_name("failure")
-        if verbose == 1:
-            print(
-                f"Failed to confirm booking for slot: {slot}")
-        return -1
-
-    except NoSuchElementException:
+            print(f"Logged in {os.getenv('USERNAME')} successfully!")
         try:
-            _ = driver.find_element_by_class_name("success")
-            if verbose == 1:
-                print(f"Booking successful for slot: {slot}")
-            return 1
-        except NoSuchElementException:
-            if verbose == 1:
-                print(
-                    f"Unsure whether it was able to book slot: {slot}")
-            return 2
+            e = driver.find_element_by_xpath("//div[@id='error']//label[@class='slds-form-element_label']").text
+            print(f"ERROR: {e}")
+        except:
+            pass
+    except Exception as e:
+        return e
 
+    # Confirm
+    WebDriverWait(driver, WAITING_TIME*2, poll_frequency).until(
+        EC.element_to_be_clickable((By.XPATH, '//button[@id="paynow"]'))).click()
 
-def book(driver, venue_url, login_details, court_ids, day, times,
+    # payments handler
+    # This requires a switch to iframe, and the nodes to complete the bank details are dynamically generated
+    header = driver.find_element_by_xpath("//div[@class='cs-overlay ']")
+    children_names = [x.get_attribute("name") for x in header.find_elements_by_xpath(".//*")]
+    iframe_names = [x for x in children_names if x is not None]
+    iframe_names = [x for x in iframe_names if '__private' in x]
+
+    try:
+        if verbose == 1:
+            print(f"CARD Number added")
+        iframe = WebDriverWait(driver, WAITING_TIME, poll_frequency).until(
+            EC.element_to_be_clickable((By.XPATH, f"//iframe[@name='{iframe_names[0]}']"))
+        )
+        driver.switch_to.frame(iframe)
+        WebDriverWait(driver, WAITING_TIME, poll_frequency).until(
+            EC.element_to_be_clickable((By.XPATH, "//input[@class='InputElement is-empty Input Input--empty']")))\
+            .send_keys(
+                os.getenv('CARD_NUMBER')
+        )
+
+        driver.switch_to.default_content()
+    except Exception as e:
+        print(e)
+
+    try:
+        if verbose == 1:
+            print(f"CARD Expiry date added")
+        iframe = WebDriverWait(driver, WAITING_TIME, poll_frequency).until(
+            EC.element_to_be_clickable((By.XPATH, f"//iframe[@name='{iframe_names[1]}']"))
+        )
+        driver.switch_to.frame(iframe)
+        WebDriverWait(driver, WAITING_TIME, poll_frequency).until(
+            EC.element_to_be_clickable((By.XPATH, "//input[@class='InputElement is-empty Input Input--empty']")))\
+            .send_keys(
+                os.getenv('CARD_EXPIRY_DATE')
+        )
+        driver.switch_to.default_content()
+    except Exception as e:
+        print(e)
+
+    try:
+        if verbose == 1:
+            print(f"CARD CVC date added")
+        iframe = WebDriverWait(driver, WAITING_TIME, poll_frequency).until(
+            EC.element_to_be_clickable((By.XPATH, f"//iframe[@name='{iframe_names[2]}']"))
+        )
+        driver.switch_to.frame(iframe)
+        WebDriverWait(driver, WAITING_TIME, poll_frequency).until(
+            EC.element_to_be_clickable((By.XPATH, "//input[@class='InputElement is-empty Input Input--empty']")))\
+            .send_keys(
+                os.getenv('CARD_CVC')
+        )
+        driver.switch_to.default_content()
+    except Exception as e:
+        print(e)
+
+    # make payment
+    WebDriverWait(driver, WAITING_TIME*2, poll_frequency).until(
+        EC.element_to_be_clickable((By.XPATH, '//button[@id="cs-stripe-elements-submit-button"]'))).click()
+    time.sleep(10)
+
+    # add error handling for failed payments
+    try:
+        e = driver.find_element_by_xpath("//div[@class='cs-overlay ']//span[@class='error']").text
+        print(f"PAYMENT ERROR: {e}")
+    except:
+        pass
+
+    return 1
+
+def book(driver, venue_url, court_ids, day, times,
          wait=None, full_hour_only=False, verbose=0):
     '''
     This function tries to book a slot in the selected venue for the day and
@@ -359,8 +402,7 @@ def book(driver, venue_url, login_details, court_ids, day, times,
             progress.
     '''
 
-    email, password = login_details
-    sign_in(driver, venue_url, email, password)
+    counter = 0
     if wait is not None:
         wait_until(wait[0], wait[1], wait[2])
     get_booking_page(driver, venue_url, day)
@@ -368,13 +410,15 @@ def book(driver, venue_url, login_details, court_ids, day, times,
         h, m = t.split(':')
         start_time = int(h) * 60 + int(m)
         court_id = is_slot_available(
-            driver, start_time, day, court_ids, full_hour_only=full_hour_only,
+            driver, start_time, day, court_ids, full_hour_only=False,
             verbose=verbose)
         if court_id is None:
             pass
         else:
-            is_booked = book_slot(driver, start_time, day, court_id,
+            is_booked = book_slot(driver, start_time, day, court_id, os.getenv('USERNAME'),
                                   verbose=verbose)
             if is_booked == 1:
-                return
-            get_booking_page(driver, venue_url, day)
+                counter += 1
+            # get_booking_page(driver, venue_url, day)
+
+    return counter
