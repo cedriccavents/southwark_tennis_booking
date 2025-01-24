@@ -1,6 +1,3 @@
-'''
-This file contains useful constants
-'''
 import os
 from dotenv import load_dotenv
 
@@ -18,13 +15,18 @@ TANNER_PARK_IDS = {
     'court4': "ad18619f-5c70-475d-942b-ae1c4dbe4739"
 }
 
+QUEENS_PARK_IDS = {
+    'court1': "cbd8fd03-7bd7-4994-8b40-59820ade1c54",
+    'court2': "e1a25134-52b1-4ef2-a289-faaa63a076e2",
+    'court3': "60a1ac3c-be49-4db7-bf68-f9b23e207d6f",
+    'court4': "88d45e6e-5378-45ad-a2ae-62c8712751af",
+    'court5': "f81df548-d5c4-4fd0-943d-7e74d29b6fe0",
+    'court6': "5d3342ab-82fb-4b02-9da1-edf1fd595212"
+}
+
 TAG = "a"
 ATTR = "data-test-id"
 
 TANNER_URL = "https://clubspark.lta.org.uk/TannerStPark/Booking/BookByDate"
 SOUTHWARK_URL = "https://clubspark.lta.org.uk/SouthwarkPark/Booking/BookByDate"
-
-# change the below to provide your user email and password
-load_dotenv()
-EMAIL = os.environ.get('EMAIL')
-PASSWORD = os.environ.get('PASSWORD')
+QUEENS_URL = "https://clubspark.lta.org.uk/QueensParkTennisCourts/Booking/BookByDate"
